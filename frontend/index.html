@@ -1,2 +1,135 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>业务分析工作室</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="/src/styles.css"></head><body><div id="app"><p class="boot">正在打开分析工作室…</p></div><div id="toast" role="status" aria-live="polite"></div><script type="module" src="/src/main.js"></script></body></html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>集团内部交易抵销台</title>
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">抵</span>
+      <div>
+        <h1>集团内部交易抵销台</h1>
+        <p class="sub">双边接报 · 自动抵销 · 封案留痕 · 净额恒等</p>
+      </div>
+    </div>
+    <div class="case-picker">
+      <label>当前抵销案</label>
+      <select id="case-select" title="选择抵销案"></select>
+      <button class="btn small light" id="new-case-btn" type="button">＋ 新建抵销案</button>
+      <span id="case-status" class="badge"></span>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="intake">① 接报</button>
+    <button class="tab" data-tab="recon">② 核对</button>
+    <button class="tab" data-tab="seal">③ 封案</button>
+    <button class="tab" data-tab="sealed">④ 批次与已封</button>
+    <button class="tab" data-tab="audit">⑤ 审计轨迹</button>
+  </nav>
+
+  <main>
+    <!-- 总览指标条 -->
+    <section class="kpi-bar" id="kpi-bar"></section>
+
+    <!-- ① 接报 -->
+    <section class="panel active" id="panel-intake">
+      <div class="panel-head">
+        <h2>双边账接报</h2>
+        <p>按 <b>单位 / 对手方 / 交易号</b> 归集；金额相反且双方齐备才抵销。整批要么完整纳入、要么整批拒收。</p>
+      </div>
+      <div class="grid-2">
+        <form id="single-form" class="card form">
+          <h3>单条报文</h3>
+          <label>报文标识 msg_uid<input name="msg_uid" required placeholder="M-2026-0001"></label>
+          <div class="row">
+            <label>单位 unit<input name="unit" required placeholder="星禾传媒（北京）"></label>
+            <label>对手方 counterparty<input name="counterparty" required placeholder="星禾科技（上海）"></label>
+          </div>
+          <div class="row">
+            <label>交易号 txn_no<input name="txn_no" required placeholder="T-1001"></label>
+            <label>修订号 revision_no
+              <input name="revision_no" type="number" min="1" value="1" required></label>
+          </div>
+          <div class="row">
+            <label>方向 direction
+              <select name="direction"><option value="RECV">RECV 收款/确认收入</option><option value="PAY">PAY 付款</option></select>
+            </label>
+            <label>金额（元，CNY）<input name="amount" type="number" step="0.01" min="0.01" required placeholder="120000.00"></label>
+          </div>
+          <label>幂等键 idempotency_key（可选）<input name="idempotency_key" placeholder="重试用同一键，不重复入账"></label>
+          <button type="submit" class="btn primary">提交报文</button>
+        </form>
+
+        <div class="card form">
+          <h3>批量 JSON 接报</h3>
+          <p class="hint">粘贴报文数组；更正请提高 <code>revision_no</code>，同版异文将被隔离。</p>
+          <textarea id="bulk-json" rows="14" placeholder='[&#10;  {"msg_uid":"M-1","unit":"甲","counterparty":"乙","txn_no":"T1","direction":"RECV","amount":1000,"revision_no":1},&#10;  {"msg_uid":"M-2","unit":"乙","counterparty":"甲","txn_no":"T1","direction":"PAY","amount":1000,"revision_no":1}&#10;]'></textarea>
+          <label>批次提交键 submission_key（可选，重试不重复建账）
+            <input id="bulk-sub-key" placeholder="submission-uuid"></label>
+          <div class="btn-row">
+            <button class="btn primary" id="bulk-submit">批量提交</button>
+            <button class="btn ghost" id="bulk-sample">填入示例</button>
+          </div>
+        </div>
+      </div>
+      <div class="card" id="receipt-box" hidden></div>
+    </section>
+
+    <!-- ② 核对 -->
+    <section class="panel" id="panel-recon">
+      <div class="panel-head">
+        <h2>待齐 / 冲突 / 已匹配核对</h2>
+      </div>
+      <div class="filter-row">
+        <button class="chip active" data-filter="all">全部</button>
+        <button class="chip warn" data-filter="pending">待齐（缺边）</button>
+        <button class="chip danger" data-filter="conflict">冲突（不符）</button>
+        <button class="chip ok" data-filter="matched">已匹配（已抵销）</button>
+        <button class="btn ghost small" id="recon-refresh">刷新</button>
+      </div>
+      <div id="deals-list"></div>
+    </section>
+
+    <!-- ③ 封案 -->
+    <section class="panel" id="panel-seal">
+      <div class="panel-head"><h2>封案前检查与封案</h2>
+        <p>未核齐（有待齐或冲突）不封案；封案后拒绝改账，批次固定双边依据快照。</p>
+      </div>
+      <div class="card" id="precheck-box"></div>
+      <div class="btn-row">
+        <button class="btn ghost" id="precheck-run">重新检查</button>
+        <button class="btn primary" id="seal-btn">执行封案</button>
+      </div>
+      <div class="card" id="seal-result" hidden></div>
+    </section>
+
+    <!-- ④ 批次 -->
+    <section class="panel" id="panel-sealed">
+      <div class="panel-head"><h2>可分析批次与抵销来源</h2>
+        <p>恒等式：抵销前净额 − 抵销额 = 抵销后净额。每笔抵销可追溯到具体双边报文快照。</p>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost" id="batch-load">加载批次</button>
+        <a class="btn ghost" id="batch-csv" href="#" hidden>导出 CSV</a>
+      </div>
+      <div id="batch-box"></div>
+      <h3 class="mt">抵销来源（含已撤销）</h3>
+      <label class="inline"><input type="checkbox" id="include-revoked"> 显示已撤销抵销</label>
+      <div id="sources-list"></div>
+    </section>
+
+    <!-- ⑤ 审计 -->
+    <section class="panel" id="panel-audit">
+      <div class="panel-head"><h2>审计轨迹</h2><p>接报、隔离、替代、抵销建立/撤销、封案全过程留痕。</p></div>
+      <div id="audit-list"></div>
+    </section>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

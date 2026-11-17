@@ -1,11 +1,2 @@
-fastapi==0.115.12
-uvicorn==0.34.2
-SQLAlchemy==2.0.41
-psycopg[binary]==3.2.9
-PyMySQL==1.1.1
-cryptography==44.0.3
-redis==5.2.1
-PyJWT==2.10.1
-numpy==2.2.6
-scipy==1.15.3
-scikit-learn==1.6.1
+# 零第三方依赖：仅使用 Python 3.11+ 标准库（http.server / sqlite3 / threading / decimal）
+# 保留该文件便于统一构建流程；如需固定 Python 版本，使用官方 python:3.12-slim 基础镜像。

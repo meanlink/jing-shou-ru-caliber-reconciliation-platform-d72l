@@ -32,3 +32,9 @@ target/
 *.o
 *.obj
 .DS_Store
+
+# 抵销台本地 SQLite 数据与 WAL
+backend/data/
+*.db
+*.db-wal
+*.db-shm
